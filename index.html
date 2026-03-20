@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Modern Tetris</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #1a1a2e;
+            color: white;
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            touch-action: none;
+            overflow: hidden;
+        }
+        canvas {
+            border: 4px solid #4e4e6a;
+            border-radius: 8px;
+            background-color: #0f3460;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .control-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.1s;
+            cursor: pointer;
+            user-select: none;
+        }
+        .control-btn:active {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="flex flex-col md:flex-row gap-8 items-start">
+        <!-- Game Board -->
+        <div class="relative">
+            <canvas id="tetris" width="240" height="400"></canvas>
+            
+            <!-- Game Over Overlay -->
+            <div id="game-over" class="hidden absolute inset-0 bg-black/80 flex flex-col items-center justify-center rounded-lg z-10">
+                <h2 class="text-3xl font-bold mb-4 text-red-500">GAME OVER</h2>
+                <button id="restart-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full font-bold transition">다시 시작</button>
+            </div>
+        </div>
+
+        <!-- Info Panel -->
+        <div class="flex flex-col gap-6 w-48">
+            <div class="bg-[#16213e] p-4 rounded-xl border border-[#4e4e6a]">
+                <h3 class="text-gray-400 text-sm mb-1 text-center font-bold">SCORE</h3>
+                <div id="score" class="text-2xl font-mono font-bold text-yellow-400 text-center">0</div>
+            </div>
+            
+            <div class="bg-[#16213e] p-4 rounded-xl border border-[#4e4e6a]">
+                <h3 class="text-gray-400 text-sm mb-1 text-center font-bold">LEVEL</h3>
+                <div id="level" class="text-2xl font-mono font-bold text-blue-400 text-center">1</div>
+            </div>
+
+            <div class="bg-[#16213e] p-4 rounded-xl border border-[#4e4e6a] flex flex-col items-center">
+                <h3 class="text-gray-400 text-sm mb-2 font-bold">NEXT</h3>
+                <canvas id="next" width="80" height="80" class="border-none bg-transparent shadow-none"></canvas>
+            </div>
+
+            <button id="start-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl font-bold transition shadow-lg">게임 시작</button>
+            <p class="text-[10px] text-gray-400 text-center">PC: 방향키(이동/회전)<br>Space: 하드드롭</p>
+        </div>
+    </div>
+
+    <!-- Touch Controls for Mobile -->
+    <div class="grid grid-cols-3 gap-3 mt-8 md:hidden w-full max-w-[300px]">
+        <div></div>
+        <button id="ctrl-rotate" class="control-btn" aria-label="Rotate">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        </button>
+        <div></div>
+        <button id="ctrl-left" class="control-btn" aria-label="Left">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+        </button>
+        <button id="ctrl-down" class="control-btn" aria-label="Down">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        </button>
+        <button id="ctrl-right" class="control-btn" aria-label="Right">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('tetris');
+        const context = canvas.getContext('2d');
+        const nextCanvas = document.getElementById('next');
+        const nextContext = nextCanvas.getContext('2d');
+
+        const SCALE = 20;
+        context.scale(SCALE, SCALE);
+        nextContext.scale(SCALE, SCALE);
+
+        const colors = [
+            null,
+            '#FF0D72', // I
+            '#0DC2FF', // L
+            '#0DFF72', // J
+            '#F538FF', // O
+            '#FF8E0D', // Z
+            '#FFE138', // S
+            '#3877FF', // T
+        ];
+
+        function createMatrix(w, h) {
+            const matrix = [];
+            while (h--) {
+                matrix.push(new Array(w).fill(0));
+            }
+            return matrix;
+        }
+
+        function createPiece(type) {
+            if (type === 'I') {
+                return [
+                    [0, 1, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 1, 0, 0],
+                ];
+            } else if (type === 'L') {
+                return [
+                    [0, 2, 0],
+                    [0, 2, 0],
+                    [0, 2, 2],
+                ];
+            } else if (type === 'J') {
+                return [
+                    [0, 3, 0],
+                    [0, 3, 0],
+                    [3, 3, 0],
+                ];
+            } else if (type === 'O') {
+                return [
+                    [4, 4],
+                    [4, 4],
+                ];
+            } else if (type === 'Z') {
+                return [
+                    [5, 5, 0],
+                    [0, 5, 5],
+                    [0, 0, 0],
+                ];
+            } else if (type === 'S') {
+                return [
+                    [0, 6, 6],
+                    [6, 6, 0],
+                    [0, 0, 0],
+                ];
+            } else if (type === 'T') {
+                return [
+                    [0, 7, 0],
+                    [7, 7, 7],
+                    [0, 0, 0],
+                ];
+            }
+        }
+
+        function drawMatrix(matrix, offset, ctx) {
+            if (!matrix) return;
+            matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        ctx.fillStyle = colors[value];
+                        ctx.fillRect(x + offset.x, y + offset.y, 1, 1);
+                        ctx.strokeStyle = '#0f3460';
+                        ctx.lineWidth = 0.05;
+                        ctx.strokeRect(x + offset.x, y + offset.y, 1, 1);
+                    }
+                });
+            });
+        }
+
+        function draw() {
+            context.fillStyle = '#0f3460';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            drawMatrix(arena, {x: 0, y: 0}, context);
+            if (player.matrix) {
+                drawMatrix(player.matrix, player.pos, context);
+            }
+
+            nextContext.fillStyle = '#16213e';
+            nextContext.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+            if (player.next) {
+                drawMatrix(player.next, {x: 1, y: 1}, nextContext);
+            }
+        }
+
+        function arenaSweep() {
+            let rowCount = 1;
+            outer: for (let y = arena.length - 1; y > 0; --y) {
+                for (let x = 0; x < arena[y].length; ++x) {
+                    if (arena[y][x] === 0) {
+                        continue outer;
+                    }
+                }
+                const row = arena.splice(y, 1)[0].fill(0);
+                arena.unshift(row);
+                ++y;
+                player.score += rowCount * 10;
+                rowCount *= 2;
+            }
+            updateScore();
+        }
+
+        function collide(arena, player) {
+            const [m, o] = [player.matrix, player.pos];
+            for (let y = 0; y < m.length; ++y) {
+                for (let x = 0; x < m[y].length; ++x) {
+                    if (m[y][x] !== 0 &&
+                       (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function merge(arena, player) {
+            player.matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        arena[y + player.pos.y][x + player.pos.x] = value;
+                    }
+                });
+            });
+        }
+
+        function rotate(matrix, dir) {
+            for (let y = 0; y < matrix.length; ++y) {
+                for (let x = 0; x < y; ++x) {
+                    [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+                }
+            }
+            if (dir > 0) {
+                matrix.forEach(row => row.reverse());
+            } else {
+                matrix.reverse();
+            }
+        }
+
+        function playerDrop() {
+            player.pos.y++;
+            if (collide(arena, player)) {
+                player.pos.y--;
+                merge(arena, player);
+                playerReset();
+                arenaSweep();
+                updateScore();
+            }
+            dropCounter = 0;
+        }
+
+        // Hard Drop: 스페이스바를 누르면 즉시 바닥으로 이동
+        function playerHardDrop() {
+            while (!collide(arena, player)) {
+                player.pos.y++;
+            }
+            player.pos.y--;
+            merge(arena, player);
+            playerReset();
+            arenaSweep();
+            updateScore();
+            dropCounter = 0;
+        }
+
+        function playerMove(offset) {
+            player.pos.x += offset;
+            if (collide(arena, player)) {
+                player.pos.x -= offset;
+            }
+        }
+
+        function playerReset() {
+            const pieces = 'TJLOSZI';
+            if (player.next === null) {
+                player.matrix = createPiece(pieces[pieces.length * Math.random() | 0]);
+                player.next = createPiece(pieces[pieces.length * Math.random() | 0]);
+            } else {
+                player.matrix = player.next;
+                player.next = createPiece(pieces[pieces.length * Math.random() | 0]);
+            }
+            
+            player.pos.y = 0;
+            player.pos.x = (arena[0].length / 2 | 0) -
+                           (player.matrix[0].length / 2 | 0);
+            
+            if (collide(arena, player)) {
+                gameOver();
+            }
+        }
+
+        function playerRotate(dir) {
+            const pos = player.pos.x;
+            let offset = 1;
+            rotate(player.matrix, dir);
+            // 벽에 부딪히면 옆으로 밀어서 회전 가능하게 함 (Wall Kick 기초)
+            while (collide(arena, player)) {
+                player.pos.x += offset;
+                offset = -(offset + (offset > 0 ? 1 : -1));
+                if (offset > player.matrix[0].length) {
+                    rotate(player.matrix, -dir);
+                    player.pos.x = pos;
+                    return;
+                }
+            }
+        }
+
+        let dropCounter = 0;
+        let dropInterval = 1000;
+        let lastTime = 0;
+        let paused = true;
+
+        const arena = createMatrix(12, 20);
+
+        const player = {
+            pos: {x: 0, y: 0},
+            matrix: null,
+            next: null,
+            score: 0,
+        };
+
+        function update(time = 0) {
+            if (paused) return;
+            const deltaTime = time - lastTime;
+
+            dropCounter += deltaTime;
+            if (dropCounter > dropInterval) {
+                playerDrop();
+            }
+
+            lastTime = time;
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function updateScore() {
+            document.getElementById('score').innerText = player.score;
+            const level = Math.floor(player.score / 100) + 1;
+            document.getElementById('level').innerText = level;
+            dropInterval = Math.max(100, 1000 - (level * 50));
+        }
+
+        function gameOver() {
+            paused = true;
+            document.getElementById('game-over').classList.remove('hidden');
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('start-btn').innerText = "재시작";
+        }
+
+        function start() {
+            arena.forEach(row => row.fill(0));
+            player.score = 0;
+            player.next = null;
+            playerReset();
+            updateScore();
+            paused = false;
+            document.getElementById('game-over').classList.add('hidden');
+            document.getElementById('start-btn').innerText = "진행 중";
+            document.getElementById('start-btn').disabled = true;
+            lastTime = performance.now();
+            requestAnimationFrame(update);
+        }
+
+        // Controls
+        document.addEventListener('keydown', event => {
+            if (paused) return;
+            switch(event.keyCode) {
+                case 37: playerMove(-1); break; // Left
+                case 39: playerMove(1); break;  // Right
+                case 40: playerDrop(); break;   // Down
+                case 38: playerRotate(1); break; // Up (Rotate)
+                case 32: playerHardDrop(); break; // Space (Hard Drop)
+                case 81: playerRotate(-1); break; // Q
+                case 87: playerRotate(1); break;  // W
+            }
+        });
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            if (paused) start();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            start();
+        });
+
+        // Mobile Controls
+        document.getElementById('ctrl-left').addEventListener('click', (e) => { e.preventDefault(); if(!paused) playerMove(-1); draw(); });
+        document.getElementById('ctrl-right').addEventListener('click', (e) => { e.preventDefault(); if(!paused) playerMove(1); draw(); });
+        document.getElementById('ctrl-down').addEventListener('click', (e) => { e.preventDefault(); if(!paused) playerDrop(); draw(); });
+        document.getElementById('ctrl-rotate').addEventListener('click', (e) => { e.preventDefault(); if(!paused) playerRotate(1); draw(); });
+
+        // Initial Draw
+        draw();
+    </script>
+</body>
+</html>
